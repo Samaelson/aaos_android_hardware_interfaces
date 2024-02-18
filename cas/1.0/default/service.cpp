@@ -27,10 +27,6 @@
 
 #include "MediaCasService.h"
 
-#ifdef ARCH_ARM_32
-#include <hwbinder/ProcessState.h>
-#endif
-
 using android::hardware::configureRpcThreadpool;
 using android::hardware::joinRpcThreadpool;
 using android::hardware::LazyServiceRegistrar;
@@ -44,9 +40,6 @@ const bool kLazyService = false;
 #endif
 
 int main() {
-    #ifdef ARCH_ARM_32
-        android::hardware::ProcessState::initWithMmapSize((size_t)32768);
-    #endif
     configureRpcThreadpool(8, true /* callerWillJoin */);
 
     // Setup hwbinder service

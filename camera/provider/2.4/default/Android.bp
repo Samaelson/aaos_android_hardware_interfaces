@@ -135,6 +135,7 @@ cc_library_shared {
     static_libs: [
         "android.hardware.camera.common@1.0-helper",
     ],
+    export_include_dirs: ["."],
 }
 
 cc_defaults {

@@ -87,32 +87,23 @@ void LegacyCameraProviderImpl_2_4::addDeviceNames(int camera_id, CameraDeviceSta
     if (deviceVersion >= CAMERA_DEVICE_API_VERSION_3_2 &&
             mModule->isOpenLegacyDefined()) {
         // try open_legacy to see if it actually works
-        if ((property_get_bool("ro.config.low_ram", /*default*/ false))) {
-           deviceNamePair = std::make_pair(cameraIdStr,
+        struct hw_device_t* halDev = nullptr;
+        int ret = mModule->openLegacy(cameraId, CAMERA_DEVICE_API_VERSION_1_0, &halDev);
+        if (ret == 0) {
+            mOpenLegacySupported[cameraIdStr] = true;
+            halDev->close(halDev);
+            deviceNamePair = std::make_pair(cameraIdStr,
                             getHidlDeviceName(cameraIdStr, CAMERA_DEVICE_API_VERSION_1_0));
-           mCameraDeviceNames.add(deviceNamePair);
-           if (cam_new) {
-              mCallbacks->cameraDeviceStatusChange(deviceNamePair.second, status);
-           }
-          } else {
-            struct hw_device_t* halDev = nullptr;
-            int ret = mModule->openLegacy(cameraId, CAMERA_DEVICE_API_VERSION_1_0, &halDev);
-            if (ret == 0) {
-               mOpenLegacySupported[cameraIdStr] = true;
-               halDev->close(halDev);
-               deviceNamePair = std::make_pair(cameraIdStr,
-                                getHidlDeviceName(cameraIdStr, CAMERA_DEVICE_API_VERSION_1_0));
-               mCameraDeviceNames.add(deviceNamePair);
-               if (cam_new) {
-                 mCallbacks->cameraDeviceStatusChange(deviceNamePair.second, status);
-              }
-            } else if (ret == -EBUSY || ret == -EUSERS) {
+            mCameraDeviceNames.add(deviceNamePair);
+            if (cam_new) {
+                mCallbacks->cameraDeviceStatusChange(deviceNamePair.second, status);
+            }
+        } else if (ret == -EBUSY || ret == -EUSERS) {
             // Looks like this provider instance is not initialized during
             // system startup and there are other camera users already.
             // Not a good sign but not fatal.
-              ALOGW("%s: open_legacy try failed!", __FUNCTION__);
-            }
-         }
+            ALOGW("%s: open_legacy try failed!", __FUNCTION__);
+        }
     }
 }
 
@@ -323,15 +314,15 @@ bool LegacyCameraProviderImpl_2_4::initialize() {
 
     mNumberOfLegacyCameras = mModule->getNumberOfCameras();
     for (int i = 0; i < mNumberOfLegacyCameras; i++) {
-        uint32_t device_version;
-        auto rc = mModule->getCameraDeviceVersion(i, &device_version);
+        struct camera_info info;
+        auto rc = mModule->getCameraInfo(i, &info);
         if (rc != NO_ERROR) {
-            ALOGE("%s: Camera device version query failed!", __func__);
+            ALOGE("%s: Camera info query failed!", __func__);
             mModule.clear();
             return true;
         }
 
-        if (checkCameraVersion(i, device_version) != OK) {
+        if (checkCameraVersion(i, info) != OK) {
             ALOGE("%s: Camera version check failed!", __func__);
             mModule.clear();
             return true;
@@ -351,7 +342,7 @@ bool LegacyCameraProviderImpl_2_4::initialize() {
 /**
  * Check that the device HAL version is still in supported.
  */
-int LegacyCameraProviderImpl_2_4::checkCameraVersion(int id, uint32_t device_version) {
+int LegacyCameraProviderImpl_2_4::checkCameraVersion(int id, camera_info info) {
     if (mModule == nullptr) {
         return NO_INIT;
     }
@@ -361,7 +352,7 @@ int LegacyCameraProviderImpl_2_4::checkCameraVersion(int id, uint32_t device_ver
     uint16_t moduleVersion = mModule->getModuleApiVersion();
     if (moduleVersion >= CAMERA_MODULE_API_VERSION_2_0) {
         // Verify the device version is in the supported range
-        switch (device_version) {
+        switch (info.device_version) {
             case CAMERA_DEVICE_API_VERSION_1_0:
             case CAMERA_DEVICE_API_VERSION_3_2:
             case CAMERA_DEVICE_API_VERSION_3_3:
@@ -379,7 +370,7 @@ int LegacyCameraProviderImpl_2_4::checkCameraVersion(int id, uint32_t device_ver
                 if (moduleVersion < CAMERA_MODULE_API_VERSION_2_5) {
                     ALOGE("%s: Device %d has unsupported version combination:"
                             "HAL version %x and module version %x",
-                            __FUNCTION__, id, device_version, moduleVersion);
+                            __FUNCTION__, id, info.device_version, moduleVersion);
                     return NO_INIT;
                 }
                 break;
@@ -389,8 +380,8 @@ int LegacyCameraProviderImpl_2_4::checkCameraVersion(int id, uint32_t device_ver
             case CAMERA_DEVICE_API_VERSION_3_1:
                 // no longer supported
             default:
-                ALOGE("%s: Device %d has HAL version %x, which is not supported", __FUNCTION__, id,
-                      device_version);
+                ALOGE("%s: Device %d has HAL version %x, which is not supported",
+                        __FUNCTION__, id, info.device_version);
                 return NO_INIT;
         }
     }
