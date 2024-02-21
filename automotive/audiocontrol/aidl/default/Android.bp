@@ -29,7 +29,7 @@ cc_binary {
     vendor: true,
     shared_libs: [
         "android.hardware.audio.common@7.0-enums",
-        "android.hardware.audio.common-V2-ndk",
+        "android.hardware.audio.common-V1-ndk",
         "android.frameworks.automotive.powerpolicy-V2-ndk",
         "android.hardware.automotive.audiocontrol-V3-ndk",
         "libbase",

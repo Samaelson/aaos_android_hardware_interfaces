@@ -253,6 +253,9 @@ class CameraAidlTest : public ::testing::TestWithParam<std::string> {
 
     static void verifyExtendedSceneModeCharacteristics(const camera_metadata_t* metadata);
 
+    void verifyHighSpeedRecordingCharacteristics(const std::string& cameraName,
+                                                 const CameraMetadata& chars);
+
     static void verifyZoomCharacteristics(const camera_metadata_t* metadata);
 
     static void verifyRecommendedConfigs(const CameraMetadata& chars);
@@ -415,7 +418,8 @@ class CameraAidlTest : public ::testing::TestWithParam<std::string> {
             int32_t frameCount, const bool *overrideSequence, const bool *expectedResults);
 
     bool supportZoomSettingsOverride(const camera_metadata_t* staticMeta);
-    bool supportsCroppedRawUseCase(const camera_metadata_t *staticMeta);
+    static bool supportsStreamUseCaseCap(const camera_metadata_t* staticMeta);
+    static bool supportsCroppedRawUseCase(const camera_metadata_t* staticMeta);
     bool isPerFrameControl(const camera_metadata_t* staticMeta);
 
     void getSupportedSizes(const camera_metadata_t* ch, uint32_t tag, int32_t format,
@@ -610,6 +614,8 @@ class CameraAidlTest : public ::testing::TestWithParam<std::string> {
 namespace {
 // device@<major>.<minor>/<type>/id
 const char* kDeviceNameRE = "device@([0-9]+\\.[0-9]+)/\\s+/(.+)";
+const std::string CAMERA_DEVICE_API_VERSION_1 = "1.1";
+
 const int32_t kMaxVideoWidth = 4096;
 const int32_t kMaxVideoHeight = 2160;
 

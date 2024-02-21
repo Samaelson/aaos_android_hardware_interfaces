@@ -32,7 +32,6 @@
 
 #include <aidl/android/hardware/audio/effect/IFactory.h>
 
-#include "AudioHalBinderServiceUtil.h"
 #include "EffectFactoryHelper.h"
 #include "TestUtils.h"
 
@@ -52,6 +51,7 @@ using aidl::android::hardware::audio::effect::Processing;
 using aidl::android::media::audio::common::AudioSource;
 using aidl::android::media::audio::common::AudioStreamType;
 using aidl::android::media::audio::common::AudioUuid;
+using android::hardware::audio::common::testing::detail::TestExecutionTracer;
 
 /// Effect factory testing.
 class EffectFactoryTest : public testing::TestWithParam<std::string> {
@@ -296,6 +296,25 @@ TEST_P(EffectFactoryTest, QueryProcess) {
             [&](const auto& proc) { return processingSet.find(proc) != processingSet.end(); }));
 }
 
+// Make sure all effect instances have same HAL version number as IFactory.
+TEST_P(EffectFactoryTest, VersionNumberForAllEffectsEqualsToIFactory) {
+    std::vector<Descriptor> descs;
+    EXPECT_IS_OK(mEffectFactory->queryEffects(std::nullopt, std::nullopt, std::nullopt, &descs));
+    EXPECT_NE(descs.size(), 0UL);
+
+    std::vector<std::shared_ptr<IEffect>> effects = createWithDescs(descs);
+    int factoryVersion = 0;
+    EXPECT_IS_OK(mEffectFactory->getInterfaceVersion(&factoryVersion));
+
+    for (const auto& effect : effects) {
+        int effectVersion = 0;
+        EXPECT_NE(nullptr, effect);
+        EXPECT_IS_OK(effect->getInterfaceVersion(&effectVersion));
+        EXPECT_EQ(factoryVersion, effectVersion);
+    }
+    ASSERT_NO_FATAL_FAILURE(destroyEffects(effects));
+}
+
 INSTANTIATE_TEST_SUITE_P(EffectFactoryTest, EffectFactoryTest,
                          testing::ValuesIn(android::getAidlHalInstanceNames(IFactory::descriptor)),
                          android::PrintInstanceNameToString);
@@ -303,6 +322,7 @@ GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(EffectFactoryTest);
 
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
+    ::testing::UnitTest::GetInstance()->listeners().Append(new TestExecutionTracer());
     ABinderProcess_setThreadPoolMaxThreadCount(1);
     ABinderProcess_startThreadPool();
     return RUN_ALL_TESTS();

@@ -24,6 +24,10 @@
 
 #include "effectFactory-impl/EffectConfig.h"
 
+#ifdef __ANDROID_APEX__
+#include <android/apexsupport.h>
+#endif
+
 using aidl::android::media::audio::common::AudioSource;
 using aidl::android::media::audio::common::AudioStreamType;
 using aidl::android::media::audio::common::AudioUuid;
@@ -89,6 +93,24 @@ std::vector<std::reference_wrapper<const tinyxml2::XMLElement>> EffectConfig::ge
 }
 
 bool EffectConfig::resolveLibrary(const std::string& path, std::string* resolvedPath) {
+    if constexpr (__ANDROID_VENDOR_API__ >= 202404) {
+        AApexInfo *apexInfo;
+        if (AApexInfo_create(&apexInfo) == AAPEXINFO_OK) {
+            std::string apexName(AApexInfo_getName(apexInfo));
+            AApexInfo_destroy(apexInfo);
+            std::string candidatePath("/apex/");
+            candidatePath.append(apexName).append(kEffectLibApexPath).append(path);
+            LOG(DEBUG) << __func__ << " effect lib path " << candidatePath;
+            if (access(candidatePath.c_str(), R_OK) == 0) {
+                *resolvedPath = std::move(candidatePath);
+                return true;
+            }
+        }
+    } else {
+        LOG(DEBUG) << __func__ << " libapexsupport is not supported";
+    }
+
+    // If audio effects libs are not in vendor apex, locate them in kEffectLibPath
     for (auto* libraryDirectory : kEffectLibPath) {
         std::string candidatePath = std::string(libraryDirectory) + '/' + path;
         if (access(candidatePath.c_str(), R_OK) == 0) {
@@ -196,16 +218,16 @@ std::optional<Processing::Type> EffectConfig::stringToProcessingType(Processing:
     // see list of audio sources in audio_source_t:
     // system/media/audio/include/system/audio_effects/audio_effects_conf.h
     static const std::map<const std::string, AudioSource> sAudioSourceTable = {
-            {MIC_SRC_TAG, AudioSource::VOICE_CALL},
-            {VOICE_UL_SRC_TAG, AudioSource::VOICE_CALL},
-            {VOICE_DL_SRC_TAG, AudioSource::VOICE_CALL},
+            {MIC_SRC_TAG, AudioSource::MIC},
+            {VOICE_UL_SRC_TAG, AudioSource::VOICE_UPLINK},
+            {VOICE_DL_SRC_TAG, AudioSource::VOICE_DOWNLINK},
             {VOICE_CALL_SRC_TAG, AudioSource::VOICE_CALL},
-            {CAMCORDER_SRC_TAG, AudioSource::VOICE_CALL},
-            {VOICE_REC_SRC_TAG, AudioSource::VOICE_CALL},
-            {VOICE_COMM_SRC_TAG, AudioSource::VOICE_CALL},
-            {REMOTE_SUBMIX_SRC_TAG, AudioSource::VOICE_CALL},
-            {UNPROCESSED_SRC_TAG, AudioSource::VOICE_CALL},
-            {VOICE_PERFORMANCE_SRC_TAG, AudioSource::VOICE_CALL}};
+            {CAMCORDER_SRC_TAG, AudioSource::CAMCORDER},
+            {VOICE_REC_SRC_TAG, AudioSource::VOICE_RECOGNITION},
+            {VOICE_COMM_SRC_TAG, AudioSource::VOICE_COMMUNICATION},
+            {REMOTE_SUBMIX_SRC_TAG, AudioSource::REMOTE_SUBMIX},
+            {UNPROCESSED_SRC_TAG, AudioSource::UNPROCESSED},
+            {VOICE_PERFORMANCE_SRC_TAG, AudioSource::VOICE_PERFORMANCE}};
 
     if (typeTag == Processing::Type::streamType) {
         auto typeIter = sAudioStreamTypeTable.find(type);

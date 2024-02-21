@@ -16,14 +16,14 @@
 
 #include <pthread.h>
 
+#define ATRACE_TAG ATRACE_TAG_AUDIO
 #define LOG_TAG "AHAL_Stream"
+#include <Utils.h>
 #include <android-base/logging.h>
 #include <android/binder_ibinder_platform.h>
 #include <utils/SystemClock.h>
+#include <utils/Trace.h>
 
-#include <Utils.h>
-
-#include "core-impl/Module.h"
 #include "core-impl/Stream.h"
 
 using aidl::android::hardware::audio::common::AudioOffloadMetadata;
@@ -90,6 +90,14 @@ bool StreamContext::isValid() const {
     return true;
 }
 
+void StreamContext::startStreamDataProcessor() {
+    auto streamDataProcessor = mStreamDataProcessor.lock();
+    if (streamDataProcessor != nullptr) {
+        streamDataProcessor->startDataProcessor(mSampleRate, getChannelCount(mChannelLayout),
+                                                mFormat);
+    }
+}
+
 void StreamContext::reset() {
     mCommandMQ.reset();
     mReplyMQ.reset();
@@ -130,7 +138,7 @@ void StreamWorkerCommonLogic::populateReply(StreamDescriptor::Reply* reply,
     reply->status = STATUS_OK;
     if (isConnected) {
         reply->observable.frames = mContext->getFrameCount();
-        reply->observable.timeNs = ::android::elapsedRealtimeNano();
+        reply->observable.timeNs = ::android::uptimeNanos();
         if (auto status = mDriver->refinePosition(&reply->observable); status == ::android::OK) {
             return;
         }
@@ -172,17 +180,20 @@ StreamInWorkerLogic::Status StreamInWorkerLogic::cycle() {
     StreamDescriptor::Reply reply{};
     reply.status = STATUS_BAD_VALUE;
     switch (command.getTag()) {
-        case Tag::halReservedExit:
-            if (const int32_t cookie = command.get<Tag::halReservedExit>();
-                cookie == (mContext->getInternalCommandCookie() ^ getTid())) {
+        case Tag::halReservedExit: {
+            const int32_t cookie = command.get<Tag::halReservedExit>();
+            if (cookie == (mContext->getInternalCommandCookie() ^ getTid())) {
                 mDriver->shutdown();
                 setClosed();
-                // This is an internal command, no need to reply.
-                return Status::EXIT;
             } else {
                 LOG(WARNING) << __func__ << ": EXIT command has a bad cookie: " << cookie;
             }
-            break;
+            if (cookie != 0) {  // This is an internal command, no need to reply.
+                return Status::EXIT;
+            } else {
+                break;
+            }
+        }
         case Tag::getStatus:
             populateReply(&reply, mIsConnected);
             break;
@@ -301,13 +312,14 @@ StreamInWorkerLogic::Status StreamInWorkerLogic::cycle() {
 }
 
 bool StreamInWorkerLogic::read(size_t clientSize, StreamDescriptor::Reply* reply) {
+    ATRACE_CALL();
     StreamContext::DataMQ* const dataMQ = mContext->getDataMQ();
     const size_t byteCount = std::min({clientSize, dataMQ->availableToWrite(), mDataBufferSize});
     const bool isConnected = mIsConnected;
     const size_t frameSize = mContext->getFrameSize();
     size_t actualFrameCount = 0;
     bool fatal = false;
-    int32_t latency = Module::kLatencyMs;
+    int32_t latency = mContext->getNominalLatencyMs();
     if (isConnected) {
         if (::android::status_t status = mDriver->transfer(mDataBuffer.get(), byteCount / frameSize,
                                                            &actualFrameCount, &latency);
@@ -392,17 +404,20 @@ StreamOutWorkerLogic::Status StreamOutWorkerLogic::cycle() {
     reply.status = STATUS_BAD_VALUE;
     using Tag = StreamDescriptor::Command::Tag;
     switch (command.getTag()) {
-        case Tag::halReservedExit:
-            if (const int32_t cookie = command.get<Tag::halReservedExit>();
-                cookie == (mContext->getInternalCommandCookie() ^ getTid())) {
+        case Tag::halReservedExit: {
+            const int32_t cookie = command.get<Tag::halReservedExit>();
+            if (cookie == (mContext->getInternalCommandCookie() ^ getTid())) {
                 mDriver->shutdown();
                 setClosed();
-                // This is an internal command, no need to reply.
-                return Status::EXIT;
             } else {
                 LOG(WARNING) << __func__ << ": EXIT command has a bad cookie: " << cookie;
             }
-            break;
+            if (cookie != 0) {  // This is an internal command, no need to reply.
+                return Status::EXIT;
+            } else {
+                break;
+            }
+        }
         case Tag::getStatus:
             populateReply(&reply, mIsConnected);
             break;
@@ -569,12 +584,13 @@ StreamOutWorkerLogic::Status StreamOutWorkerLogic::cycle() {
 }
 
 bool StreamOutWorkerLogic::write(size_t clientSize, StreamDescriptor::Reply* reply) {
+    ATRACE_CALL();
     StreamContext::DataMQ* const dataMQ = mContext->getDataMQ();
     const size_t readByteCount = dataMQ->availableToRead();
     const size_t frameSize = mContext->getFrameSize();
     bool fatal = false;
-    int32_t latency = Module::kLatencyMs;
-    if (bool success = readByteCount > 0 ? dataMQ->read(&mDataBuffer[0], readByteCount) : true) {
+    int32_t latency = mContext->getNominalLatencyMs();
+    if (readByteCount > 0 ? dataMQ->read(&mDataBuffer[0], readByteCount) : true) {
         const bool isConnected = mIsConnected;
         LOG(VERBOSE) << __func__ << ": reading of " << readByteCount << " bytes from data MQ"
                      << " succeeded; connected? " << isConnected;
@@ -592,6 +608,10 @@ bool StreamOutWorkerLogic::write(size_t clientSize, StreamDescriptor::Reply* rep
                 status != ::android::OK) {
                 fatal = true;
                 LOG(ERROR) << __func__ << ": write failed: " << status;
+            }
+            auto streamDataProcessor = mContext->getStreamDataProcessor().lock();
+            if (streamDataProcessor != nullptr) {
+                streamDataProcessor->process(mDataBuffer.get(), actualFrameCount * frameSize);
             }
         } else {
             if (mContext->getAsyncCallback() == nullptr) {
@@ -836,7 +856,7 @@ ndk::ScopedAStatus StreamIn::setHwGain(const std::vector<float>& in_channelGains
 }
 
 StreamInHwGainHelper::StreamInHwGainHelper(const StreamContext* context)
-    : mChannelCount(getChannelCount(context->getChannelLayout())) {}
+    : mChannelCount(getChannelCount(context->getChannelLayout())), mHwGains(mChannelCount, 0.0f) {}
 
 ndk::ScopedAStatus StreamInHwGainHelper::getHwGainImpl(std::vector<float>* _aidl_return) {
     *_aidl_return = mHwGains;
@@ -967,7 +987,8 @@ ndk::ScopedAStatus StreamOut::selectPresentation(int32_t in_presentationId, int3
 }
 
 StreamOutHwVolumeHelper::StreamOutHwVolumeHelper(const StreamContext* context)
-    : mChannelCount(getChannelCount(context->getChannelLayout())) {}
+    : mChannelCount(getChannelCount(context->getChannelLayout())),
+      mHwVolumes(mChannelCount, 0.0f) {}
 
 ndk::ScopedAStatus StreamOutHwVolumeHelper::getHwVolumeImpl(std::vector<float>* _aidl_return) {
     *_aidl_return = mHwVolumes;

@@ -433,31 +433,31 @@ void CameraDevice::sDataCb(int32_t msg_type, const camera_memory_t *data, unsign
              index, mem->mNumBufs);
         return;
     }
-   if (object->mDeviceCallback != nullptr) {
-	   CameraFrameMetadata hidlMetadata;
-	   if (metadata) {
-		   hidlMetadata.faces.resize(metadata->number_of_faces);
-		   for (size_t i = 0; i < hidlMetadata.faces.size(); i++) {
-			   hidlMetadata.faces[i].score = metadata->faces[i].score;
-			   hidlMetadata.faces[i].id = metadata->faces[i].id;
-			   for (int k = 0; k < 4; k++) {
-				   hidlMetadata.faces[i].rect[k] = metadata->faces[i].rect[k];
-			   }
-			   for (int k = 0; k < 2; k++) {
-				   hidlMetadata.faces[i].leftEye[k] = metadata->faces[i].left_eye[k];
-			   }
-			   for (int k = 0; k < 2; k++) {
-				   hidlMetadata.faces[i].rightEye[k] = metadata->faces[i].right_eye[k];
-			   }
-			   for (int k = 0; k < 2; k++) {
-				   hidlMetadata.faces[i].mouth[k] = metadata->faces[i].mouth[k];
-			   }
-		   }
-	   }
-	   CameraHeapMemory* mem = static_cast<CameraHeapMemory *>(data->handle);
-	   object->mDeviceCallback->dataCallback(
-			   (DataCallbackMsg) msg_type, mem->handle.mId, index, hidlMetadata);
-   }
+    if (object->mDeviceCallback != nullptr) {
+        CameraFrameMetadata hidlMetadata;
+        if (metadata) {
+            hidlMetadata.faces.resize(metadata->number_of_faces);
+            for (size_t i = 0; i < hidlMetadata.faces.size(); i++) {
+                hidlMetadata.faces[i].score = metadata->faces[i].score;
+                hidlMetadata.faces[i].id = metadata->faces[i].id;
+                for (int k = 0; k < 4; k++) {
+                    hidlMetadata.faces[i].rect[k] = metadata->faces[i].rect[k];
+                }
+                for (int k = 0; k < 2; k++) {
+                    hidlMetadata.faces[i].leftEye[k] = metadata->faces[i].left_eye[k];
+                }
+                for (int k = 0; k < 2; k++) {
+                    hidlMetadata.faces[i].rightEye[k] = metadata->faces[i].right_eye[k];
+                }
+                for (int k = 0; k < 2; k++) {
+                    hidlMetadata.faces[i].mouth[k] = metadata->faces[i].mouth[k];
+                }
+            }
+        }
+        CameraHeapMemory* mem = static_cast<CameraHeapMemory *>(data->handle);
+        object->mDeviceCallback->dataCallback(
+                (DataCallbackMsg) msg_type, mem->handle.mId, index, hidlMetadata);
+    }
 }
 
 void CameraDevice::handleCallbackTimestamp(
